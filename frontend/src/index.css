@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+body { font-family: 'Inter', system-ui, sans-serif; background: #f8faf9; color: #1a1a1a; }
+
+.verdict-FALSE      { @apply bg-danger-light text-danger-dark font-medium; }
+.verdict-MISLEADING { @apply bg-warn-light   text-warn-dark   font-medium; }
+.verdict-TRUE       { @apply bg-safe-light   text-safe-dark   font-medium; }
+.verdict-UNVERIFIED { @apply bg-gray-100     text-gray-600    font-medium; }
