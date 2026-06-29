@@ -187,7 +187,6 @@ async def check_claim(req: ClaimRequest):
             contents=PROMPT.format(text=req.text),
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=schema,
                 temperature=0.1,
                 max_output_tokens=1200,
             ),
