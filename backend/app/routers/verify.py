@@ -4,8 +4,7 @@ import uuid
 from datetime import datetime
 from typing import List, Literal, Optional
 
-import google.genai as genai
-
+from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
@@ -39,13 +38,24 @@ class FactCheckResponse(BaseModel):
 
 
 def clean_schema(node):
+    """
+    Strip keys Gemini doesn't support — but NEVER remove 'type'.
+    Removing 'type' leaves None where Gemini calls .upper(), causing
+    AttributeError: 'NoneType' object has no attribute 'upper'.
+    """
+    # These are safe to remove — Gemini ignores or crashes on them
     UNSUPPORTED = {"title", "description", "$schema", "$defs",
                    "maximum", "minimum", "anyOf", "allOf", "oneOf", "not"}
     if isinstance(node, dict):
-        return {k: clean_schema(v) for k, v in node.items() if k not in UNSUPPORTED}
+        return {
+            k: clean_schema(v)
+            for k, v in node.items()
+            if k not in UNSUPPORTED
+        }
     if isinstance(node, list):
         return [clean_schema(i) for i in node]
     return node
+
 
 schema = clean_schema(FactCheckResponse.model_json_schema())
 
@@ -67,15 +77,10 @@ def extract_text(response) -> str:
 # ── JSON repair ───────────────────────────────────────────────────────────────
 
 def repair_json(raw: str) -> str:
-    """
-    Gemini sometimes truncates output mid-token — missing closing quotes,
-    brackets, or braces. Walk the string tracking open structures and
-    string state, then append whatever closers are missing.
-    """
     raw = raw.strip()
     try:
         json.loads(raw)
-        return raw          # fast path: already valid
+        return raw
     except json.JSONDecodeError:
         pass
 
@@ -104,10 +109,10 @@ def repair_json(raw: str) -> str:
 
     repaired = raw
     if in_string:
-        repaired += '"'                          # close open string
+        repaired += '"'
     closers = {'{': '}', '[': ']'}
     for opener in reversed(stack):
-        repaired += closers[opener]              # close open containers
+        repaired += closers[opener]
 
     try:
         json.loads(repaired)
@@ -115,17 +120,16 @@ def repair_json(raw: str) -> str:
     except json.JSONDecodeError:
         pass
 
-    # Last resort: trim after the last complete comma, then close again
     last_comma = repaired.rfind(',')
     if last_comma != -1:
         trimmed = repaired[:last_comma]
         stack2, in_s2, esc2 = [], False, False
         for ch in trimmed:
-            if esc2:         esc2 = False; continue
+            if esc2:             esc2 = False; continue
             if ch == '\\' and in_s2: esc2 = True; continue
-            if ch == '"':    in_s2 = not in_s2; continue
-            if in_s2:        continue
-            if ch in ('{','['): stack2.append(ch)
+            if ch == '"':        in_s2 = not in_s2; continue
+            if in_s2:            continue
+            if ch in ('{', '['): stack2.append(ch)
             elif ch == '}' and stack2 and stack2[-1] == '{': stack2.pop()
             elif ch == ']' and stack2 and stack2[-1] == '[': stack2.pop()
         for opener in reversed(stack2):
@@ -136,10 +140,10 @@ def repair_json(raw: str) -> str:
         except json.JSONDecodeError:
             pass
 
-    return repaired   # return best attempt; caller handles final parse error
+    return repaired
 
 
-# ── Safe field defaults (handles partial JSON after truncation) ───────────────
+# ── Safe field defaults ───────────────────────────────────────────────────────
 
 VALID_VERDICTS   = {"FALSE", "MISLEADING", "UNVERIFIED", "TRUE"}
 VALID_LANGUAGES  = {"Hindi", "English", "Marathi", "Mixed", "Other"}
@@ -147,7 +151,7 @@ VALID_CATEGORIES = {"Health", "Government Scheme", "Communal", "Election",
                     "Economic", "Local", "Other"}
 VALID_RISKS      = {"high", "medium", "low"}
 
-def safe_get(d: dict, key: str, default, valid_set=None):
+def safe_get(d, key, default, valid_set=None):
     val = d.get(key, default)
     if val is None:
         return default
@@ -167,7 +171,6 @@ class ClaimRequest(BaseModel):
 PROMPT = """You are SachBot, an AI fact-checking assistant for India.
 Analyze the forwarded WhatsApp message and evaluate its authenticity.
 Be direct and use simple language a non-expert can understand.
-
 You MUST respond with a complete JSON object. Do not stop before closing all braces.
 
 Forwarded message:
@@ -186,7 +189,7 @@ async def check_claim(req: ClaimRequest):
                 response_mime_type="application/json",
                 response_schema=schema,
                 temperature=0.1,
-                max_output_tokens=1200,   # headroom prevents most truncations
+                max_output_tokens=1200,
             ),
         )
 
@@ -194,20 +197,15 @@ async def check_claim(req: ClaimRequest):
         print(f"[Gemini raw] {raw}")
 
         fixed = repair_json(raw)
-        if fixed != raw:
-            print(f"[Repaired]  {fixed}")
-
         result = json.loads(fixed)
 
-        # Use safe_get so a partial response never causes a KeyError or
-        # passes an invalid enum value downstream
-        verdict    = safe_get(result, "verdict",    "UNVERIFIED", VALID_VERDICTS)
+        verdict    = safe_get(result, "verdict",     "UNVERIFIED", VALID_VERDICTS)
         confidence = int(safe_get(result, "confidence", 50))
         category   = safe_get(result, "category",   "Other",      VALID_CATEGORIES)
         language   = safe_get(result, "language",   "Other",      VALID_LANGUAGES)
-        risk       = safe_get(result, "risk_level", "low",        VALID_RISKS)
+        risk       = safe_get(result, "risk_level",  "low",        VALID_RISKS)
         explanation = safe_get(result, "explanation", "Could not fully analyze this claim.")
-        claim_text  = safe_get(result, "claim", req.text[:120])
+        claim_text  = safe_get(result, "claim",       req.text[:120])
         sources     = result.get("sources") or []
 
         safe_to_share = result.get("safe_to_share")
@@ -240,13 +238,13 @@ async def check_claim(req: ClaimRequest):
         return {"success": True, "result": record}
 
     except json.JSONDecodeError as e:
-        print(f"[JSON error] {e} | raw: {raw!r}")
-        raise HTTPException(status_code=500, detail=f"JSON parse failed after repair: {e}")
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"JSON parse failed: {e}")
     except ValueError as e:
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
 
