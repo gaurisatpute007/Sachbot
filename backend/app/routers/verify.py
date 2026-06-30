@@ -171,7 +171,21 @@ class ClaimRequest(BaseModel):
 PROMPT = """You are SachBot, an AI fact-checking assistant for India.
 Analyze the forwarded WhatsApp message and evaluate its authenticity.
 Be direct and use simple language a non-expert can understand.
-You MUST respond with a complete JSON object. Do not stop before closing all braces.
+
+You MUST respond with ONLY a single valid JSON object — no markdown, no code fences, no extra text.
+Use exactly this shape:
+{{
+  "verdict": "FALSE" | "MISLEADING" | "UNVERIFIED" | "TRUE",
+  "confidence": <integer 0-100>,
+  "claim": "<one sentence extracting the core checkable claim>",
+  "explanation": "<2-3 sentences explaining the verdict>",
+  "language": "Hindi" | "English" | "Marathi" | "Mixed" | "Other",
+  "category": "Health" | "Government Scheme" | "Communal" | "Election" | "Economic" | "Local" | "Other",
+  "safe_to_share": true | false,
+  "risk_level": "high" | "medium" | "low",
+  "sources": [],
+  "needs_human_review": true | false
+}}
 
 Forwarded message:
 {text}"""
@@ -187,7 +201,6 @@ async def check_claim(req: ClaimRequest):
             contents=PROMPT.format(text=req.text),
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=schema,
                 temperature=0.1,
                 max_output_tokens=1200,
             ),
