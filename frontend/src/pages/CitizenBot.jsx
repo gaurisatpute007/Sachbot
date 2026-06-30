@@ -79,9 +79,17 @@ export default function CitizenBot() {
       const data = await verifyClaim(text, district)
       setMessages(m => [...m.filter(x => x.role !== 'typing'), { role: 'bot', ...data.result, time: now() }])
     } catch (err) {
+      const status = err?.response?.status
+      const detail = err?.response?.data?.detail || err?.message
+      const isQuota = status === 429
       setMessages(m => [...m.filter(x => x.role !== 'typing'), {
-        role: 'bot', verdict: 'UNVERIFIED', confidence: 0, time: now(),
-        explanation: err?.response?.data?.detail || err?.message || 'Could not reach the server. Make sure the backend is running on port 8000.',
+        role: 'bot',
+        verdict: 'UNVERIFIED',
+        confidence: 0,
+        time: now(),
+        explanation: isQuota
+          ? '⏳ ' + (detail || 'Daily AI quota reached for this demo. Please try again shortly.')
+          : (detail || 'Could not reach the server. Make sure the backend is running.'),
       }])
     }
     setLoading(false)

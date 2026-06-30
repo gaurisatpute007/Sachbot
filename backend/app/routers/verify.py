@@ -187,6 +187,7 @@ async def check_claim(req: ClaimRequest):
             contents=PROMPT.format(text=req.text),
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
+                response_schema=schema,
                 temperature=0.1,
                 max_output_tokens=1200,
             ),
@@ -244,6 +245,12 @@ async def check_claim(req: ClaimRequest):
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         import traceback; traceback.print_exc()
+        err_str = str(e)
+        if "RESOURCE_EXHAUSTED" in err_str or "429" in err_str:
+            raise HTTPException(
+                status_code=429,
+                detail="SachBot has reached its daily AI quota for this demo. Please try again in a few minutes, or check back tomorrow once the quota resets."
+            )
         raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
 
